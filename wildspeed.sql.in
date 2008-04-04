@@ -1,0 +1,41 @@
+BEGIN;
+
+-- support functions for gin
+CREATE OR REPLACE FUNCTION gin_extract_permuted(text, internal)
+RETURNS internal
+AS 'MODULE_PATHNAME'
+LANGUAGE C IMMUTABLE;
+
+CREATE OR REPLACE FUNCTION wildcmp(text, text, bool)
+RETURNS int32
+AS 'MODULE_PATHNAME'
+LANGUAGE C IMMUTABLE;
+
+CREATE OR REPLACE FUNCTION gin_extract_wildcard(text, internal, int2, internal)
+RETURNS internal
+AS 'MODULE_PATHNAME'
+LANGUAGE C IMMUTABLE;
+
+CREATE OR REPLACE FUNCTION gin_consistent_wildcard(internal, int2, text)
+RETURNS internal
+AS 'MODULE_PATHNAME'
+LANGUAGE C IMMUTABLE;
+
+CREATE OPERATOR CLASS wildcard_ops
+FOR TYPE text USING gin
+AS
+    OPERATOR        1       ~~ RECHECK,
+	FUNCTION        1       wildcmp(text,text,bool),
+	FUNCTION        2       gin_extract_permuted(text, internal),
+	FUNCTION        3       gin_extract_wildcard(text, internal, int2, internal),
+	FUNCTION        4       gin_consistent_wildcard(internal, int2, text),
+STORAGE         text;
+
+
+--debug function
+CREATE OR REPLACE FUNCTION permute(text)
+RETURNS _text
+AS 'MODULE_PATHNAME'
+LANGUAGE C STRICT IMMUTABLE;
+
+COMMIT;
