@@ -133,14 +133,9 @@ gin_extract_permuted(PG_FUNCTION_ARGS)
 	PG_RETURN_POINTER(entries);
 }
 
-PG_FUNCTION_INFO_V1(wildcmp);
-Datum       wildcmp(PG_FUNCTION_ARGS);
-Datum
-wildcmp(PG_FUNCTION_ARGS)
+static int 
+wildcmp_internal(text *a, text *b, bool partialMatch)
 {
-	text	*a = PG_GETARG_TEXT_P(0);
-	text	*b = PG_GETARG_TEXT_P(1);
-	bool	partialMatch = PG_GETARG_BOOL(2);
 	int32	cmp;
 	int		lena,
 			lenb;
@@ -243,6 +238,39 @@ wildcmp(PG_FUNCTION_ARGS)
 			cmp = (lena < lenb) ? -1 : 1;
 		}
 	}
+
+	return cmp;
+}
+
+PG_FUNCTION_INFO_V1(wildcmp);
+Datum       wildcmp(PG_FUNCTION_ARGS);
+Datum
+wildcmp(PG_FUNCTION_ARGS)
+{
+	text	*a = PG_GETARG_TEXT_P(0);
+	text	*b = PG_GETARG_TEXT_P(1);
+	int32	cmp;
+
+	cmp = wildcmp_internal(a, b, false);
+
+	PG_FREE_IF_COPY(a,0);
+	PG_FREE_IF_COPY(b,1);
+	PG_RETURN_INT32( cmp );	
+}
+
+PG_FUNCTION_INFO_V1(wildcmp_prefix);
+Datum       wildcmp_prefix(PG_FUNCTION_ARGS);
+Datum
+wildcmp_prefix(PG_FUNCTION_ARGS)
+{
+	text	*a = PG_GETARG_TEXT_P(0);
+	text	*b = PG_GETARG_TEXT_P(1);
+#ifdef NOT_USED
+	StrategyNumber 	strategy = PG_GETARG_UINT16(2);
+#endif
+	int32	cmp;
+
+	cmp = wildcmp_internal(a, b, true);
 
 	PG_FREE_IF_COPY(a,0);
 	PG_FREE_IF_COPY(b,1);
@@ -356,6 +384,7 @@ gin_extract_wildcard(PG_FUNCTION_ARGS)
 #endif
 	bool			*partialmatch, 
 					**ptr_partialmatch = (bool**) PG_GETARG_POINTER(3);
+	bool			*needRecheck = (bool*) ((PG_NARGS() == 5) ? PG_GETARG_POINTER(4) : NULL); 
 	Datum      		*entries = NULL;
 	char			*qptr = VARDATA(q);
 	int				clen,
@@ -365,6 +394,8 @@ gin_extract_wildcard(PG_FUNCTION_ARGS)
 	text			*entry;
 
 	*nentries = 0;
+	if ( needRecheck )
+		*needRecheck = false;
 
 	if ( lenq == 0 )
 	{
@@ -454,6 +485,9 @@ gin_extract_wildcard(PG_FUNCTION_ARGS)
 				entries[ *nentries ] =  PointerGetDatum( entry );
 				(*nentries)++;
 			}
+
+			if ( needRecheck && splitqlen > 3 /* X1 may be inside X OR Y */ )
+				*needRecheck = true;
 		}
 		else
 		{
@@ -476,6 +510,8 @@ gin_extract_wildcard(PG_FUNCTION_ARGS)
 				entries[ *nentries ] =  PointerGetDatum( entry );
 				(*nentries)++;
 			}
+			if ( needRecheck && splitqlen > 2 /* we don't remeber an order of Xn */ )
+				*needRecheck = true;
 		}
 	} 
 	else
@@ -510,6 +546,8 @@ gin_extract_wildcard(PG_FUNCTION_ARGS)
 				entries[ *nentries ] =  PointerGetDatum( entry );
 				(*nentries)++;
 			}
+			if ( needRecheck && splitqlen > 2 /* X1 may be inside X */ )
+				*needRecheck = true;
 		}
 		else
 		{
@@ -534,6 +572,9 @@ gin_extract_wildcard(PG_FUNCTION_ARGS)
 				partialmatch[ *nentries ] = true;
 				entries[ *nentries ] =  PointerGetDatum( entry );
 				(*nentries)++;
+
+			if ( needRecheck && splitqlen > 3 /* we don't remeber an order of Xn */ )
+				*needRecheck = true;
 			}
 		}
 	}
@@ -542,12 +583,27 @@ gin_extract_wildcard(PG_FUNCTION_ARGS)
 
 #ifdef OPTIMIZE_WILDCARD_QUERY
 	if ( *nentries > 1 )
+	{
+		int saven = *nentries;
+
 		optimize_wildcard_search( entries, nentries );
+
+		if ( needRecheck && saven != *nentries )
+			*needRecheck = true;
+	}
 #endif
 
 	PG_RETURN_POINTER(entries);
 }
 
+typedef struct PerCallConsistentStorage {
+	int		nentries;
+	bool	needRecheck;
+	int		datasz;
+	char	data[1]; /* query */
+} PerCallConsistentStorage;
+
+#define PCCSHDR_SZ	offsetof(PerCallConsistentStorage, data)
 
 PG_FUNCTION_INFO_V1(gin_consistent_wildcard);
 Datum       gin_consistent_wildcard(PG_FUNCTION_ARGS);
@@ -555,36 +611,47 @@ Datum
 gin_consistent_wildcard(PG_FUNCTION_ARGS)
 {
 	bool       	*check = (bool *) PG_GETARG_POINTER(0);
+	text		*query = PG_GETARG_TEXT_P(2);
 	bool        res = true;
 	int         i;
-	int32 		nentries;
+	PerCallConsistentStorage *pccs = NULL;
+	bool	    *recheck = (bool *) PG_GETARG_POINTER(3);
 
-	if ( fcinfo->flinfo->fn_extra == NULL )
+	*recheck = true;
+
+	pccs = (PerCallConsistentStorage*) fcinfo->flinfo->fn_extra;
+
+	if (  pccs == NULL || pccs->datasz != VARSIZE(query) || memcmp( pccs->data, query, pccs->datasz) !=0  )
 	{
-		bool	*pmatch;
+		bool	*pmatch = NULL;
 
 		/*
-		 * we need to get nentries, we'll get it by regular way
+		 * we need to fill our cache, we'll get it by regular way
 		 * and store it in function context
 		 */
 
-		fcinfo->flinfo->fn_extra = MemoryContextAlloc(fcinfo->flinfo->fn_mcxt,
-														sizeof(int32));
+		pccs = (PerCallConsistentStorage*) MemoryContextAlloc(fcinfo->flinfo->fn_mcxt,
+												PCCSHDR_SZ + VARSIZE(query)	);
+		pccs->datasz = VARSIZE(query);
+		memcpy( pccs->data, query, pccs->datasz);
 
-		DirectFunctionCall4(
+		DirectFunctionCall5(
 					gin_extract_wildcard,
-					PG_GETARG_DATUM(2),  /* query */
-					PointerGetDatum( fcinfo->flinfo->fn_extra ), /* &nentries */
+					PointerGetDatum(query),
+					PointerGetDatum( &pccs->nentries ), /* &nentries */
 					PG_GETARG_DATUM(1),  /* strategy */
-					PointerGetDatum( &pmatch )
+					PointerGetDatum( &pmatch ),
+					PointerGetDatum( &pccs->needRecheck )
 		);
+
+		fcinfo->flinfo->fn_extra = (void*)pccs;
 	}
 
-	nentries = *(int32*) fcinfo->flinfo->fn_extra;
-
-	for (i = 0; res && i < nentries; i++)
+	for (i = 0; res && i < pccs->nentries; i++)
 		if (check[i] == false)
 			res = false;
+
+	*recheck = pccs->needRecheck;
 
 	PG_RETURN_BOOL(res);
 }

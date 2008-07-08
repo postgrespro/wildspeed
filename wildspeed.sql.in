@@ -6,7 +6,12 @@ RETURNS internal
 AS 'MODULE_PATHNAME'
 LANGUAGE C IMMUTABLE;
 
-CREATE OR REPLACE FUNCTION wildcmp(text, text, bool)
+CREATE OR REPLACE FUNCTION wildcmp(text, text)
+RETURNS int32
+AS 'MODULE_PATHNAME'
+LANGUAGE C IMMUTABLE;
+
+CREATE OR REPLACE FUNCTION wildcmp_prefix(text, text, int2)
 RETURNS int32
 AS 'MODULE_PATHNAME'
 LANGUAGE C IMMUTABLE;
@@ -24,11 +29,12 @@ LANGUAGE C IMMUTABLE;
 CREATE OPERATOR CLASS wildcard_ops
 FOR TYPE text USING gin
 AS
-    OPERATOR        1       ~~ RECHECK,
-	FUNCTION        1       wildcmp(text,text,bool),
+    OPERATOR        1       ~~,
+	FUNCTION        1       wildcmp(text,text),
 	FUNCTION        2       gin_extract_permuted(text, internal),
 	FUNCTION        3       gin_extract_wildcard(text, internal, int2, internal),
 	FUNCTION        4       gin_consistent_wildcard(internal, int2, text),
+	FUNCTION        5       wildcmp_prefix(text,text,int2),
 STORAGE         text;
 
 
