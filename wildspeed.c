@@ -384,7 +384,7 @@ gin_extract_wildcard(PG_FUNCTION_ARGS)
 #endif
 	bool			*partialmatch, 
 					**ptr_partialmatch = (bool**) PG_GETARG_POINTER(3);
-	bool			*needRecheck = (bool*) ((PG_NARGS() == 6) ? PG_GETARG_POINTER(5) : NULL); 
+	Pointer			**extra = (Pointer**)PG_GETARG_POINTER(4);
 	Datum      		*entries = NULL;
 	char			*qptr = VARDATA(q);
 	int				clen,
@@ -392,10 +392,9 @@ gin_extract_wildcard(PG_FUNCTION_ARGS)
 					i;
 	WildItem		*items;
 	text			*entry;
+	bool			needRecheck = false;
 
 	*nentries = 0;
-	if ( needRecheck )
-		*needRecheck = false;
 
 	if ( lenq == 0 )
 	{
@@ -486,8 +485,8 @@ gin_extract_wildcard(PG_FUNCTION_ARGS)
 				(*nentries)++;
 			}
 
-			if ( needRecheck && splitqlen > 3 /* X1 may be inside X OR Y */ )
-				*needRecheck = true;
+			if ( splitqlen > 3 /* X1 may be inside X OR Y */ )
+				needRecheck = true;
 		}
 		else
 		{
@@ -510,8 +509,8 @@ gin_extract_wildcard(PG_FUNCTION_ARGS)
 				entries[ *nentries ] =  PointerGetDatum( entry );
 				(*nentries)++;
 			}
-			if ( needRecheck && splitqlen > 2 /* we don't remeber an order of Xn */ )
-				*needRecheck = true;
+			if ( splitqlen > 2 /* we don't remeber an order of Xn */ )
+				needRecheck = true;
 		}
 	} 
 	else
@@ -546,8 +545,8 @@ gin_extract_wildcard(PG_FUNCTION_ARGS)
 				entries[ *nentries ] =  PointerGetDatum( entry );
 				(*nentries)++;
 			}
-			if ( needRecheck && splitqlen > 2 /* X1 may be inside X */ )
-				*needRecheck = true;
+			if ( splitqlen > 2 /* X1 may be inside X */ )
+				needRecheck = true;
 		}
 		else
 		{
@@ -573,8 +572,8 @@ gin_extract_wildcard(PG_FUNCTION_ARGS)
 				entries[ *nentries ] =  PointerGetDatum( entry );
 				(*nentries)++;
 
-			if ( needRecheck && splitqlen > 3 /* we don't remeber an order of Xn */ )
-				*needRecheck = true;
+			if ( splitqlen > 3 /* we don't remeber an order of Xn */ )
+				needRecheck = true;
 			}
 		}
 	}
@@ -588,22 +587,23 @@ gin_extract_wildcard(PG_FUNCTION_ARGS)
 
 		optimize_wildcard_search( entries, nentries );
 
-		if ( needRecheck && saven != *nentries )
-			*needRecheck = true;
+		if ( saven != *nentries )
+			needRecheck = true;
 	}
 #endif
+
+	if (needRecheck)
+	{
+		/*
+		 * Non empty extra signals to consistentFn about
+		 * rechecking of result
+		 */
+		*extra = palloc0(sizeof(Pointer) * *nentries);
+	}
 
 	PG_RETURN_POINTER(entries);
 }
 
-typedef struct PerCallConsistentStorage {
-	int		nentries;
-	bool	needRecheck;
-	int		datasz;
-	char	data[1]; /* query */
-} PerCallConsistentStorage;
-
-#define PCCSHDR_SZ	offsetof(PerCallConsistentStorage, data)
 
 PG_FUNCTION_INFO_V1(gin_consistent_wildcard);
 Datum       gin_consistent_wildcard(PG_FUNCTION_ARGS);
@@ -611,48 +611,21 @@ Datum
 gin_consistent_wildcard(PG_FUNCTION_ARGS)
 {
 	bool       	*check = (bool *) PG_GETARG_POINTER(0);
+#ifdef NOT_USED
+	StrategyNumber strategy = PG_GETARG_UINT16(1);
 	text		*query = PG_GETARG_TEXT_P(2);
+#endif
+	int			nentries = PG_GETARG_INT32(3);
+	Pointer		*extra = (Pointer *) PG_GETARG_POINTER(4);
+	bool	    *recheck = (bool *) PG_GETARG_POINTER(5);
 	bool        res = true;
 	int         i;
-	PerCallConsistentStorage *pccs = NULL;
-	bool	    *recheck = (bool *) PG_GETARG_POINTER(5);
 
-	*recheck = true;
-
-	pccs = (PerCallConsistentStorage*) fcinfo->flinfo->fn_extra;
-
-	if (  pccs == NULL || pccs->datasz != VARSIZE(query) || memcmp( pccs->data, query, pccs->datasz) !=0  )
-	{
-		bool	*pmatch = NULL;
-
-		/*
-		 * we need to fill our cache, we'll get it by regular way
-		 * and store it in function context
-		 */
-
-		pccs = (PerCallConsistentStorage*) MemoryContextAlloc(fcinfo->flinfo->fn_mcxt,
-												PCCSHDR_SZ + VARSIZE(query)	);
-		pccs->datasz = VARSIZE(query);
-		memcpy( pccs->data, query, pccs->datasz);
-
-		DirectFunctionCall6(
-					gin_extract_wildcard,
-					PointerGetDatum(query),
-					PointerGetDatum( &pccs->nentries ), /* &nentries */
-					PG_GETARG_DATUM(1),  /* strategy */
-					PointerGetDatum( &pmatch ),
-					PointerGetDatum(NULL),
-					PointerGetDatum( &pccs->needRecheck )
-		);
-
-		fcinfo->flinfo->fn_extra = (void*)pccs;
-	}
-
-	for (i = 0; res && i < pccs->nentries; i++)
+	for (i = 0; res && i < nentries; i++)
 		if (check[i] == false)
 			res = false;
 
-	*recheck = pccs->needRecheck;
+	*recheck = (extra == NULL) ? false : true;
 
 	PG_RETURN_BOOL(res);
 }
