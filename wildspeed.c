@@ -384,7 +384,7 @@ gin_extract_wildcard(PG_FUNCTION_ARGS)
 #endif
 	bool			*partialmatch, 
 					**ptr_partialmatch = (bool**) PG_GETARG_POINTER(3);
-	bool			*needRecheck = (bool*) ((PG_NARGS() == 5) ? PG_GETARG_POINTER(4) : NULL); 
+	bool			*needRecheck = (bool*) ((PG_NARGS() == 6) ? PG_GETARG_POINTER(5) : NULL); 
 	Datum      		*entries = NULL;
 	char			*qptr = VARDATA(q);
 	int				clen,
@@ -615,7 +615,7 @@ gin_consistent_wildcard(PG_FUNCTION_ARGS)
 	bool        res = true;
 	int         i;
 	PerCallConsistentStorage *pccs = NULL;
-	bool	    *recheck = (bool *) PG_GETARG_POINTER(3);
+	bool	    *recheck = (bool *) PG_GETARG_POINTER(5);
 
 	*recheck = true;
 
@@ -635,12 +635,13 @@ gin_consistent_wildcard(PG_FUNCTION_ARGS)
 		pccs->datasz = VARSIZE(query);
 		memcpy( pccs->data, query, pccs->datasz);
 
-		DirectFunctionCall5(
+		DirectFunctionCall6(
 					gin_extract_wildcard,
 					PointerGetDatum(query),
 					PointerGetDatum( &pccs->nentries ), /* &nentries */
 					PG_GETARG_DATUM(1),  /* strategy */
 					PointerGetDatum( &pmatch ),
+					PointerGetDatum(NULL),
 					PointerGetDatum( &pccs->needRecheck )
 		);
 
