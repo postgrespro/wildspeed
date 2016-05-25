@@ -1,0 +1,5 @@
+# wildspeed extension
+comment = 'Wildspeed - fast wildcard search for LIKE operator'
+default_version = '1.0'
+module_pathname = '$libdir/wildspeed'
+relocatable = true

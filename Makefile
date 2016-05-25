@@ -1,9 +1,11 @@
 PG_CPPFLAGS = -DOPTIMIZE_WILDCARD_QUERY
 MODULE_big = wildspeed
-OBJS = wildspeed.o 
+OBJS = wildspeed.o
 
-DATA_built = wildspeed.sql
-DATA = uninstall_wildspeed.sql
+EXTENSION = wildspeed
+DATA = wildspeed--1.0.sql
+PGFILEDESC = "Wildspeed - fast wildcard search for LIKE operator"
+
 REGRESS = wildspeed
 
 ifdef USE_PGXS

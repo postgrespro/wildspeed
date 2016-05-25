@@ -1,4 +1,5 @@
-BEGIN;
+-- complain if script is sourced in psql, rather than via CREATE EXTENSION
+\echo Use "CREATE EXTENSION wildspeed" to load this file. \quit
 
 -- support functions for gin
 CREATE OR REPLACE FUNCTION gin_extract_permuted(text, internal)
@@ -29,7 +30,7 @@ LANGUAGE C IMMUTABLE;
 CREATE OPERATOR CLASS wildcard_ops
 FOR TYPE text USING gin
 AS
-    OPERATOR        1       ~~,
+	OPERATOR        1       ~~,
 	FUNCTION        1       wildcmp(text,text),
 	FUNCTION        2       gin_extract_permuted(text, internal),
 	FUNCTION        3       gin_extract_wildcard(text, internal, int2, internal),
@@ -43,5 +44,3 @@ CREATE OR REPLACE FUNCTION permute(text)
 RETURNS _text
 AS 'MODULE_PATHNAME'
 LANGUAGE C STRICT IMMUTABLE;
-
-COMMIT;

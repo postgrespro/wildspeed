@@ -1,11 +1,11 @@
 --
 -- first, define the datatype.  Turn off echoing so that expected file
--- does not depend on contents of wildspeed.sql.
+-- does not depend on `CREATE EXTENSION wildspeed` output.
 --
 
 SET client_min_messages = warning;
 \set ECHO none
-\i wildspeed.sql
+CREATE EXTENSION wildspeed;
 \set ECHO all
 RESET client_min_messages;
 

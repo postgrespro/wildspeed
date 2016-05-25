@@ -1,11 +1,11 @@
-.gitignore
-*.swp
 *.o
 *.a
+*.so
 *.d
 *.orig
 *.rej
-temp
-diffs
-etc
-results
+*.gcda
+*.gcno
+/.deps/
+/diffs/
+/results/
