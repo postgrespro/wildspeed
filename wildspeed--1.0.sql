@@ -27,6 +27,11 @@ RETURNS internal
 AS 'MODULE_PATHNAME'
 LANGUAGE C IMMUTABLE;
 
+CREATE OR REPLACE FUNCTION gin_triconsistent_wildcard(internal, int2, text, int4, internal, internal, internal)
+RETURNS internal
+AS 'MODULE_PATHNAME'
+LANGUAGE C IMMUTABLE;
+
 CREATE OPERATOR CLASS wildcard_ops
 FOR TYPE text USING gin
 AS
@@ -36,6 +41,7 @@ AS
 	FUNCTION        3       gin_extract_wildcard(text, internal, int2, internal),
 	FUNCTION        4       gin_consistent_wildcard(internal, int2, text),
 	FUNCTION        5       wildcmp_prefix(text,text,int2),
+	FUNCTION		6		gin_triconsistent_wildcard(internal, int2, text, int4, internal, internal, internal),
 STORAGE         text;
 
 
